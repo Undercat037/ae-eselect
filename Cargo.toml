@@ -1,0 +1,27 @@
+[package]
+name = "ae-eselect"
+version = "1.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "GPL-3.0-only"
+description = "eselect module for aura-emerge"
+authors = ["Undercat037"]
+
+[[bin]]
+name = "eselect"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6", features = ["derive"] }
+clap_complete = "4.6"
+clap_mangen = "0.3"
+colored = "3"
+anyhow = "1"
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

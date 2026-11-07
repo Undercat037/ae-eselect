@@ -1,0 +1,17 @@
+_ae_shim() {
+  if [[ -x /usr/lib/aura-emerge/eselect-shim ]]; then
+    /usr/lib/aura-emerge/eselect-shim "$1" || true
+  fi
+}
+
+post_install() {
+  _ae_shim remove
+}
+
+post_upgrade() {
+  _ae_shim remove
+}
+
+post_remove() {
+  _ae_shim install
+}
