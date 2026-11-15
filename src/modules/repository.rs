@@ -21,8 +21,10 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, bail};
 use colored::Colorize;
 
+use crate::out;
 use crate::paths::{ESELECT_CONF, KEYRING_DIR, MAKE_CONF, PACMAN_GNUPG, REPOS_CONF, REPOS_DB};
 use crate::util::fs::{atomic_write, ensure_dir};
+use crate::util::pkgdb;
 use crate::util::root::{confirm, require_root};
 
 use std::os::unix::process::CommandExt;
@@ -265,11 +267,10 @@ fn features_has_repos() -> bool {
 
 fn hint_features() {
     if !features_has_repos() {
-        eprintln!(
-            "{} FEATURES=\"repos\" is not set in {} — emerge ignores repos.conf until it is",
-            ">>>".yellow().bold(),
+        out::write_warning_msg(&format!(
+            "FEATURES=\"repos\" is not set in {} — emerge ignores repos.conf until it is",
             MAKE_CONF
-        );
+        ));
     }
 }
 
@@ -327,24 +328,22 @@ pub fn cmd_list(installed_only: bool) -> Result<()> {
     }
 
     rows.sort();
+    out::write_list_start("Available repositories:");
     if rows.is_empty() {
-        println!("No repositories found ({}).", ESELECT_CONF);
+        out::write_none_found("(none found)");
         return Ok(());
     }
-    println!("Repositories:");
     for (i, (name, mark)) in rows.iter().enumerate() {
-        let m = match mark {
-            '*' => "*".green().bold().to_string(),
-            '#' => "#".yellow().to_string(),
-            '+' => "+".cyan().to_string(),
-            c => c.to_string(),
+        // '*' enabled in eselect.conf, '#' disabled, '+' defined in another
+        // repos.conf file, ' ' known (keys/template present) but not enabled
+        let label = match mark {
+            '*' => out::highlight_marker(name),
+            '#' => format!("{} {}", name, "(disabled)".yellow()),
+            '+' => format!("{} {}", name, "(repos.conf)".cyan()),
+            _ => name.clone(),
         };
-        println!("  [{:>2}] {} {}", i + 1, m, name);
+        out::write_numbered_list_entry(i + 1, &label);
     }
-    println!();
-    println!(
-        "  * enabled (eselect.conf)   # disabled   + in repos.conf   (blank) known, not enabled"
-    );
     Ok(())
 }
 
@@ -368,12 +367,10 @@ pub fn cmd_enable(names: &[String]) -> Result<()> {
             }
             let e = entry_from_template(name);
             if !e.has_source() {
-                eprintln!(
-                    "{} no template for '{}' — add it with: eselect repository add {} <sync-uri>",
-                    "!!!".red().bold(),
-                    name,
-                    name
-                );
+                out::write_error_msg(&format!(
+                    "no template for '{}' — add it with: eselect repository add {} <sync-uri>",
+                    name, name
+                ));
                 continue;
             }
             println!("{} add {} -> {}", ">>>".green().bold(), name, ESELECT_CONF);
@@ -611,7 +608,9 @@ fn is_fpr(s: &str) -> bool {
 fn ensure_master_key() -> Result<()> {
     let out = gpg_run(&["--list-secret-keys", "--with-colons"], None)?;
     if !out.lines().any(|l| l.starts_with("sec:")) {
-        bail!("pacman keyring not initialised — run `pacman-key --init` first");
+        bail!(
+            "alpm keyring not initialised — run `pacman-key --init` (or initialise /etc/pacman.d/gnupg) first"
+        );
     }
     Ok(())
 }
@@ -685,4 +684,39 @@ mod tests {
         e.set("include", "/etc/pacman.d/mirrorlist");
         assert!(e.has_source());
     }
+}
+
+/// Print every package of one synced repository, one per line, straight
+/// from `/var/lib/pacman/sync/<repo>.db` (no pacman/emerge involved).
+/// Plain text only, so `> file` / `| tee file` produce a clean package list
+/// for profiles.
+pub fn cmd_packages(repo: &str, versions: bool, prefix: bool) -> Result<()> {
+    let pkgs = pkgdb::read_sync(repo).map_err(|e| {
+        let known = pkgdb::sync_repos();
+        if known.is_empty() {
+            e
+        } else {
+            e.context(format!("synced repositories: {}", known.join(", ")))
+        }
+    })?;
+    let stdout = std::io::stdout();
+    let mut w = std::io::BufWriter::new(stdout.lock());
+    for p in &pkgs {
+        let name = if prefix {
+            format!("{}/{}", repo, p.name)
+        } else {
+            p.name.clone()
+        };
+        let line = if versions {
+            format!("{} {}", name, p.version)
+        } else {
+            name
+        };
+        // A closed pipe (`| head`) is not an error.
+        if writeln!(w, "{}", line).is_err() {
+            return Ok(());
+        }
+    }
+    let _ = w.flush();
+    Ok(())
 }

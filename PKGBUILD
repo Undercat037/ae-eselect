@@ -2,13 +2,17 @@
 pkgname=aeutils-eselect-git
 pkgver=0.0.0
 pkgrel=1
-pkgdesc="eselect for aura-emerge - modular configuration and management tool"
+pkgdesc="A modular configuration tool in the style of Gentoo eselect for aura-emerge: select profile, repositories and their keys, the world file, caches, the package database lock and Java environments - with Portage-like output."
 arch=('x86_64')
 url="https://undercat037.github.io/aura-emerge/"
-# Github repo: https://github.com/Undercat037/aura-emerge
+# Github repo: https://github.com/Undercat037/ae-eselect
+# Gitlab repo: https://gitlab.com/Undercat037/ae-eselect
 license=('GPL-3.0-only')
-depends=('pacman' 'gnupg')
-optdepends=('aura-emerge: eselect news')
+depends=('gnupg')
+optdepends=(
+  'aura-emerge: eselect core'
+  'pacman: libalpm - package, cache, path and keyring layout'
+)
 makedepends=('rust' 'cargo')
 conflicts=('portage' 'portage-git' 'eselect-git' 'aeutils-eselect')
 provides=('eselect' 'aeutils-eselect')
@@ -87,7 +91,9 @@ package() {
 
   install -Dm755 target/release/eselect "$pkgdir/usr/bin/eselect"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 README.MD "$pkgdir/usr/share/doc/$pkgname/README.MD"
+  install -Dm644 RU-README.MD "$pkgdir/usr/share/doc/$pkgname/RU-README.MD"
+  install -Dm644 UA-README.MD "$pkgdir/usr/share/doc/$pkgname/UA-README.MD"
 
   install -Dm644 man/*.1 -t "$pkgdir/usr/share/man/man1/"
 

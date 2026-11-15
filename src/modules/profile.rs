@@ -6,8 +6,8 @@ use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use colored::Colorize;
 
+use crate::out;
 use crate::paths::{self, MAKE_PROFILE, PROFILE_ROOT};
 use crate::util::fs::{ensure_dir, relative_from};
 use crate::util::root::{confirm, require_root};
@@ -87,36 +87,28 @@ pub fn list_numbered() -> Vec<(usize, String, String, bool)> {
 
 pub fn cmd_list() {
     let rows = list_numbered();
+    out::write_list_start("Available profile symlink targets:");
     if rows.is_empty() {
-        println!("No profiles found under:\n  {}", PROFILE_ROOT);
+        out::write_none_found("(none found)");
         return;
     }
-    println!("Available profile symlink targets:");
     for (n, _root, rel, cur) in &rows {
-        let mark = if *cur { " * " } else { "   " };
-        println!("{:>4}{}{}", n, mark, rel);
-    }
-    println!();
-    if let Some(p) = paths::make_profile_target() {
-        println!("Current {} symlink:", MAKE_PROFILE);
-        println!("  -> {}", p.display());
-    } else {
-        println!("{} not set", MAKE_PROFILE);
+        if *cur {
+            out::write_numbered_list_entry(*n, &out::highlight_marker(rel));
+        } else {
+            out::write_numbered_list_entry(*n, rel);
+        }
     }
 }
 
 pub fn cmd_show() {
+    out::write_list_start(&format!("Current {} symlink:", MAKE_PROFILE));
     match paths::make_profile_target() {
-        Some(p) => {
-            println!("Current {} symlink:", MAKE_PROFILE);
-            if let Ok(rel) = p.strip_prefix(PROFILE_ROOT) {
-                println!("  {}", rel.display());
-            } else {
-                println!("  {}", p.display());
-            }
-            println!("  -> {}", p.display());
-        }
-        None => println!("{} is not set", MAKE_PROFILE),
+        Some(p) => match p.strip_prefix(PROFILE_ROOT) {
+            Ok(rel) => println!("  {}", rel.display()),
+            Err(_) => println!("  {}", p.display()),
+        },
+        None => println!("  (unset)"),
     }
 }
 
@@ -157,12 +149,7 @@ pub fn cmd_set(spec: &str) -> Result<()> {
             }
             std::fs::rename(link_path, &bak)
                 .with_context(|| format!("cannot move {} -> {}", MAKE_PROFILE, bak))?;
-            eprintln!(
-                "{} moved {} -> {}",
-                ">>>".yellow().bold(),
-                MAKE_PROFILE,
-                bak
-            );
+            out::write_warning_msg(&format!("moved {} -> {}", MAKE_PROFILE, bak));
         }
     }
 
@@ -177,12 +164,6 @@ pub fn cmd_set(spec: &str) -> Result<()> {
         })
         .with_context(|| format!("cannot replace {}", MAKE_PROFILE))?;
 
-    println!(
-        "{} {} -> {}",
-        ">>>".green().bold(),
-        MAKE_PROFILE,
-        target.display()
-    );
     Ok(())
 }
 
@@ -201,7 +182,7 @@ fn resolve_spec(spec: &str) -> Result<PathBuf> {
             .into_iter()
             .find(|(i, _, _, _)| *i == n)
             .map(|(_, root, rel, _)| PathBuf::from(root).join(rel))
-            .ok_or_else(|| anyhow::anyhow!("no profile number {} (try list)", n));
+            .ok_or_else(|| anyhow::anyhow!("Target \"{}\" doesn't appear to be valid!", n));
     }
     let p = PathBuf::from(spec);
     if p.is_dir() {
@@ -211,7 +192,7 @@ fn resolve_spec(spec: &str) -> Result<PathBuf> {
     if cand.is_dir() {
         return Ok(std::fs::canonicalize(&cand).unwrap_or(cand));
     }
-    bail!("unknown profile '{}' (path or index from list)", spec)
+    bail!("Target \"{}\" doesn't appear to be valid!", spec)
 }
 
 #[allow(dead_code)]

@@ -1,8 +1,8 @@
 //! `eselect db` — lock / unlock / status of the alpm database lock.
 //!
-//! Pacman/libalpm uses `/var/lib/pacman/db.lck`. AE and pacman both
-//! honour it; this module lets the admin clear a stale lock or take
-//! an exclusive lock for maintenance.
+//! libalpm uses `/var/lib/pacman/db.lck`. aura-emerge and other alpm
+//! clients honour it; this module lets the admin clear a stale lock
+//! or take an exclusive lock for maintenance.
 
 use std::fs;
 use std::path::Path;
@@ -54,7 +54,7 @@ pub fn cmd_status() {
         println!("{} locked{}", "db".yellow().bold(), age);
         println!("  {}", DB_LCK);
         if procs.is_empty() {
-            println!("  no pacman/emerge process running — lock looks stale");
+            println!("  no emerge/alpm process running — lock looks stale");
         }
     } else {
         println!("{} unlocked", "db".green().bold());

@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod db;
+pub mod java;
 pub mod news;
 pub mod profile;
 pub mod repository;

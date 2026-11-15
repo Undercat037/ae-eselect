@@ -1,5 +1,6 @@
-//! `eselect cache` — clean pacman pkg cache and AE per-user caches.
+//! `eselect cache` — clean package cache and AE per-user caches.
 //!
+//! Package cache: `/var/cache/pacman/pkg` (filesystem only, no package-manager CLI).
 //! AE layout (per user): ~/.cache/aura-emerge/{build,sources,packages}.
 //! Running as root we must not follow symlinks planted by users, so every
 //! path component below the home dir is checked to be a real directory.
@@ -34,12 +35,12 @@ pub fn cmd_clean(o: &Opts) -> Result<()> {
     let do_build = o.all || o.build;
 
     if !do_pacman && !do_sources && !do_packages && !do_build {
-        println!("Nothing selected. Use: --pacman --sources --packages --build | --all");
+        println!("Nothing selected. Use: --pkgcache --sources --packages --build | --all");
         return Ok(());
     }
 
     if do_pacman {
-        clean_dir(Path::new(PACMAN_CACHE), "pacman pkg cache", o)?;
+        clean_dir(Path::new(PACMAN_CACHE), "package cache", o)?;
     }
     for home in home_dirs() {
         for (on, sub) in [

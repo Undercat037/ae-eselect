@@ -1,8 +1,22 @@
+/*
+Copyright (C) 2026 Undercat037
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, version 3 of the License
+
+
+A modular configuration tool in the style of Gentoo
+eselect for aura-emerge: select profile,
+repositories and their keys,
+the world file, caches, the package database lock
+and Java environments - with Portage-like output.
+*/
+
 //! ae-eselect — modular configuration tool for aura-emerge
 //!
 //!   eselect <module> <action> [args]
 //!
-//! Modules: profile, repository, news, world, cache, db.
+//! Modules: profile, repository, news, world, cache, db, java.
 //! Man pages and shell completions are generated from this clap tree:
 //!   eselect --gen-completions <shell>
 //!   eselect --gen-manpage [DIR]
@@ -10,33 +24,49 @@
 use std::io;
 use std::path::PathBuf;
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 
+mod help;
 mod modules;
+mod out;
 mod paths;
 mod util;
 
-use modules::{cache, db, news, profile, repository, world};
+use modules::{cache, db, java, news, profile, repository, world};
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ColourMode {
+    Yes,
+    No,
+    Auto,
+}
 
 #[derive(Parser)]
 #[command(
     name = "eselect",
     version,
-    about = "Configuration tool for aura-emerge / Cynosure",
-    long_about = "Configuration tool for aura-emerge / Cynosure.\n\n\
-        Gentoo-style: eselect <module> <action> [args]. Not part of emerge; \
-        emerge ships only a minimal `eselect profile` shim.",
-    after_help = "Files:\n  \
-        /etc/portage/make.profile             selected profile (symlink)\n  \
-        /etc/portage/repos.conf/eselect.conf  repositories managed by eselect\n  \
-        /etc/portage/world                    world file\n  \
-        /var/db/portage/profiles              profile tree\n  \
-        /var/db/portage/repos/<name>/         repo templates and keys",
-    arg_required_else_help = true,
+    about = "Configuration tool for aura-emerge",
+    long_about = None,
+    disable_help_subcommand = true,
+    arg_required_else_help = false,
     propagate_version = true
 )]
 struct Cli {
+    /// Make output shorter
+    #[arg(long = "brief", global = true)]
+    brief: bool,
+
+    /// Enable or disable colour output
+    #[arg(
+        long = "colour",
+        visible_alias = "color",
+        value_name = "WHEN",
+        default_value = "auto",
+        global = true
+    )]
+    colour: ColourMode,
+
     /// Print shell completions to stdout
     #[arg(
         long = "gen-completions",
@@ -48,7 +78,13 @@ struct Cli {
     gen_completions: Option<Shell>,
 
     /// Write man pages (one per module/action) into DIR; no DIR = main page on stdout
-    #[arg(long = "gen-manpage", value_name = "DIR", hide = true, exclusive = true, num_args = 0..=1)]
+    #[arg(
+        long = "gen-manpage",
+        value_name = "DIR",
+        hide = true,
+        exclusive = true,
+        num_args = 0..=1
+    )]
     gen_manpage: Option<Option<PathBuf>>,
 
     #[command(subcommand)]
@@ -77,16 +113,44 @@ enum Module {
         #[command(subcommand)]
         action: WorldAction,
     },
-    /// Clean pacman and aura-emerge caches
+    /// Clean package and aura-emerge caches
     Cache {
         #[command(subcommand)]
         action: CacheAction,
     },
-    /// Show, take or clear the pacman database lock
+    /// Show, take or clear the alpm database lock
     Db {
         #[command(subcommand)]
         action: DbAction,
     },
+    /// Manage installed Java environments (built-in archlinux-java)
+    Java {
+        #[command(subcommand)]
+        action: Option<JavaAction>,
+    },
+    /// Display a help message
+    Help,
+    /// Display a usage message
+    Usage,
+    /// Display version information
+    Version,
+}
+
+#[derive(Subcommand)]
+enum JavaAction {
+    /// List Java environments, the default one is marked
+    Status,
+    /// Print the name of the default environment
+    Get,
+    /// Make an environment the default
+    Set {
+        /// Name from `status`, e.g. java-21-openjdk or java-8-openjdk/jre
+        env: String,
+    },
+    /// Remove the default environment
+    Unset,
+    /// Repair the default link (pick the newest environment if it is broken)
+    Fix,
 }
 
 #[derive(Subcommand)]
@@ -128,6 +192,17 @@ enum RepositoryAction {
         #[arg(short = 'f', long = "force")]
         force: bool,
     },
+    /// Print every package of a synced repository (plain, pipe-friendly)
+    Packages {
+        /// Repository name (a `<name>.db` in the pacman sync dir)
+        name: String,
+        /// Append the package version
+        #[arg(short = 'v', long = "versions")]
+        versions: bool,
+        /// Prefix every line with `<repo>/`
+        #[arg(short = 'r', long = "with-repo")]
+        prefix: bool,
+    },
     /// Add a repository by URL
     Add {
         name: String,
@@ -136,7 +211,7 @@ enum RepositoryAction {
         /// Higher is preferred
         #[arg(short = 'p', long, default_value_t = 50)]
         priority: i32,
-        /// Pacman SigLevel string, e.g. "Required DatabaseOptional"
+        /// Signature level string, e.g. "Required DatabaseOptional"
         #[arg(long = "sig", value_name = "LEVEL")]
         sig: Option<String>,
     },
@@ -157,7 +232,7 @@ enum NewsAction {
 enum WorldAction {
     /// Print the world file
     Show,
-    /// Add pacman explicit packages that are missing from world
+    /// Add installed explicit packages that are missing from world
     Regen {
         /// Only show what would be added
         #[arg(short = 'p', long = "pretend")]
@@ -172,9 +247,9 @@ enum WorldAction {
 enum CacheAction {
     /// Delete cached files
     Clean {
-        /// /var/cache/pacman/pkg
-        #[arg(long)]
-        pacman: bool,
+        /// Package cache (/var/cache/pacman/pkg)
+        #[arg(long = "pkgcache", alias = "pacman")]
+        pkgcache: bool,
         /// AE source cache (~/.cache/aura-emerge/sources)
         #[arg(long)]
         sources: bool,
@@ -204,22 +279,49 @@ enum DbAction {
     Lock,
     /// Remove db.lck
     Unlock {
-        /// Remove even if pacman/emerge looks to be running
+        /// Remove even if emerge/alpm clients look to be running
         #[arg(short = 'f', long = "force")]
         force: bool,
     },
 }
 
 fn main() {
-    let cli = Cli::parse();
+    // Gentoo-style help screens (`eselect`, `eselect <module>`, ...) first.
+    let mut argv: Vec<String> = std::env::args().collect();
+    // `archlinux-java <action>` (symlink/hardlink to eselect) == `eselect java <action>`;
+    // package install scripts call it by that name.
+    let invoked = argv
+        .first()
+        .and_then(|a| std::path::Path::new(a).file_name())
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if invoked == "archlinux-java" {
+        argv.insert(1, "java".to_string());
+    }
+    let args: Vec<String> = argv.iter().skip(1).cloned().collect();
+    if let Some(code) = help::intercept(&args) {
+        std::process::exit(code);
+    }
+
+    let cli = Cli::parse_from(&argv);
+    apply_colour(cli.colour);
+    out::set_brief(cli.brief);
     let code = match run(cli) {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("!!! {:#}", e);
+            out::write_error_msg(&format!("{:#}", e));
             1
         }
     };
     std::process::exit(code);
+}
+
+fn apply_colour(mode: ColourMode) {
+    match mode {
+        ColourMode::Yes => colored::control::set_override(true),
+        ColourMode::No => colored::control::set_override(false),
+        ColourMode::Auto => {}
+    }
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
@@ -239,11 +341,28 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         }
         return Ok(());
     }
+
     let Some(module) = cli.module else {
-        Cli::command().print_help()?;
+        help::print_main_help();
         return Ok(());
     };
+
     match module {
+        Module::Help | Module::Usage => {
+            help::print_main_help();
+            Ok(())
+        }
+        Module::Version => {
+            println!("eselect {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+        Module::Java { action } => match action.unwrap_or(JavaAction::Status) {
+            JavaAction::Status => java::cmd_status(),
+            JavaAction::Get => java::cmd_get(),
+            JavaAction::Set { env } => java::cmd_set(&env),
+            JavaAction::Unset => java::cmd_unset(),
+            JavaAction::Fix => java::cmd_fix(),
+        },
         Module::Profile { action } => match action {
             ProfileAction::List => {
                 profile::cmd_list();
@@ -260,6 +379,11 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             RepositoryAction::Enable { names } => repository::cmd_enable(&names),
             RepositoryAction::Disable { names } => repository::cmd_disable(&names),
             RepositoryAction::Remove { names, force } => repository::cmd_remove(&names, force),
+            RepositoryAction::Packages {
+                name,
+                versions,
+                prefix,
+            } => repository::cmd_packages(&name, versions, prefix),
             RepositoryAction::Add {
                 name,
                 sync_uri,
@@ -277,7 +401,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         },
         Module::Cache { action } => match action {
             CacheAction::Clean {
-                pacman,
+                pkgcache,
                 sources,
                 packages,
                 build,
@@ -285,7 +409,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 pretend,
                 yes,
             } => cache::cmd_clean(&cache::Opts {
-                pacman,
+                pacman: pkgcache,
                 sources,
                 packages,
                 build,

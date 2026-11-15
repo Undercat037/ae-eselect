@@ -1,12 +1,11 @@
-//! `eselect world` — regen world from pacman explicit set.
+//! `eselect world` — show / regen world from the local alpm explicit set.
 //!
-//! Moves `--regen-world-from-explicit` logic out of emerge into the
-//! utility tool (as planned in the ToDo).
+//! Reads `/var/lib/pacman/local/*/desc` directly (no `pacman` CLI).
+//! Explicit packages are those without `%REASON%` or with reason `0`.
 
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use colored::Colorize;
@@ -14,6 +13,8 @@ use colored::Colorize;
 use crate::paths::WORLD;
 use crate::util::fs::atomic_write;
 use crate::util::root::{confirm, require_root};
+
+const LOCAL_DB: &str = "/var/lib/pacman/local";
 
 pub fn cmd_show() -> Result<()> {
     let path = Path::new(WORLD);
@@ -35,13 +36,13 @@ pub fn cmd_show() -> Result<()> {
     Ok(())
 }
 
-/// Add pacman explicit packages (`pacman -Qeq`) that are missing from world.
+/// Add installed explicit packages (local alpm DB) that are missing from world.
 pub fn cmd_regen(pretend: bool, ask: bool) -> Result<()> {
     if !pretend {
         require_root("eselect world regen")?;
     }
 
-    let explicit = pacman_explicit()?;
+    let explicit = local_explicit()?;
     let current = load_world()?;
     let mut missing: Vec<String> = explicit
         .into_iter()
@@ -94,19 +95,64 @@ pub fn cmd_regen(pretend: bool, ask: bool) -> Result<()> {
     Ok(())
 }
 
-fn pacman_explicit() -> Result<Vec<String>> {
-    let out = Command::new("pacman")
-        .args(["-Qeq"])
-        .output()
-        .context("run pacman -Qeq")?;
-    if !out.status.success() {
-        bail!("pacman -Qeq failed");
+/// Explicit packages from the local alpm database (no package-manager CLI).
+///
+/// `%REASON%` absent or `0` → explicit; `1` → installed as a dependency.
+fn local_explicit() -> Result<Vec<String>> {
+    let root = Path::new(LOCAL_DB);
+    if !root.is_dir() {
+        bail!("{} missing — is the alpm local database present?", LOCAL_DB);
     }
-    Ok(String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect())
+    let mut out = Vec::new();
+    for e in fs::read_dir(root).with_context(|| LOCAL_DB.to_string())? {
+        let e = e?;
+        if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let desc = e.path().join("desc");
+        if !desc.is_file() {
+            continue;
+        }
+        let text = fs::read_to_string(&desc).unwrap_or_default();
+        let (name, reason) = parse_desc_name_reason(&text);
+        let Some(name) = name else { continue };
+        // Explicit: no REASON field, or REASON == 0.
+        let is_explicit = match reason.as_deref() {
+            None => true,
+            Some(r) => r.trim() == "0",
+        };
+        if is_explicit {
+            out.push(name);
+        }
+    }
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
+fn parse_desc_name_reason(text: &str) -> (Option<String>, Option<String>) {
+    let mut name: Option<String> = None;
+    let mut reason: Option<String> = None;
+    let mut field: Option<&str> = None;
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix('%') {
+            if let Some(key) = rest.strip_suffix('%') {
+                field = Some(key);
+                continue;
+            }
+        }
+        let t = line.trim();
+        if t.is_empty() {
+            field = None;
+            continue;
+        }
+        match field {
+            Some("NAME") if name.is_none() => name = Some(t.to_string()),
+            Some("REASON") if reason.is_none() => reason = Some(t.to_string()),
+            _ => {}
+        }
+    }
+    (name, reason)
 }
 
 fn load_world() -> Result<HashSet<String>> {
@@ -127,4 +173,25 @@ fn load_world() -> Result<HashSet<String>> {
         set.insert(t.to_string());
     }
     Ok(set)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_explicit_without_reason() {
+        let t = "%NAME%\nfoo\n%VERSION%\n1.0-1\n";
+        let (n, r) = parse_desc_name_reason(t);
+        assert_eq!(n.as_deref(), Some("foo"));
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn parses_dep_reason() {
+        let t = "%NAME%\nbar\n%REASON%\n1\n";
+        let (n, r) = parse_desc_name_reason(t);
+        assert_eq!(n.as_deref(), Some("bar"));
+        assert_eq!(r.as_deref(), Some("1"));
+    }
 }
