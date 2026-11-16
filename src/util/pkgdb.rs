@@ -14,6 +14,8 @@ use anyhow::{Context, Result, bail};
 pub const SYNC_DIR: &str = "/var/lib/pacman/sync";
 pub const LOCAL_DIR: &str = "/var/lib/pacman/local";
 
+/// `desc` / `base` are parsed for future listings (`-v` with descriptions).
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct Pkg {
     pub name: String,
