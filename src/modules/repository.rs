@@ -249,7 +249,7 @@ fn entry_from_template(name: &str) -> RepoEntry {
     e
 }
 
-fn features_has_repos() -> bool {
+pub fn features_has_repos() -> bool {
     let Ok(text) = fs::read_to_string(MAKE_CONF) else {
         return false;
     };
@@ -347,6 +347,50 @@ pub fn cmd_list(installed_only: bool) -> Result<()> {
     Ok(())
 }
 
+/// The `include =` mirrorlist of a repo must exist, or AE refuses to sync it.
+/// Install the one shipped with the template (`<REPOS_DB>/<name>/mirrorlist`);
+/// without one, say how to get a mirrorlist.
+fn ensure_mirrorlist(name: &str, e: &RepoEntry) {
+    let Some(inc) = e.get("include") else { return };
+    let dst = Path::new(inc);
+    if dst.exists() {
+        return;
+    }
+    let src = Path::new(REPOS_DB).join(name).join("mirrorlist");
+    if src.is_file() {
+        let res = (|| -> Result<()> {
+            if let Some(dir) = dst.parent() {
+                ensure_dir(dir)?;
+            }
+            let body = fs::read_to_string(&src)?;
+            atomic_write(dst, &body)?;
+            Ok(())
+        })();
+        match res {
+            Ok(()) => println!(
+                "{} mirrorlist {} installed from {}",
+                ">>>".green().bold(),
+                dst.display(),
+                src.display()
+            ),
+            Err(err) => eprintln!(
+                "{} mirrorlist {}: {}",
+                ">>>".yellow().bold(),
+                dst.display(),
+                err
+            ),
+        }
+    } else {
+        out::write_warning_msg(&format!(
+            "[{}] includes {} which does not exist — install the repository's mirrorlist \
+             package or write it, then rank it with: eselect reflector {}",
+            name,
+            dst.display(),
+            name
+        ));
+    }
+}
+
 pub fn cmd_enable(names: &[String]) -> Result<()> {
     require_root("eselect repository enable")?;
     let mut entries = load_eselect_repos()?;
@@ -377,6 +421,9 @@ pub fn cmd_enable(names: &[String]) -> Result<()> {
             entries.push(e);
         }
         changed = true;
+        if let Some(e) = entries.iter().find(|e| e.name == *name) {
+            ensure_mirrorlist(name, e);
+        }
         match import_keys(name) {
             Ok(msg) => println!("{} {}", ">>>".green().bold(), msg),
             Err(err) => eprintln!("{} keys for {}: {}", ">>>".yellow().bold(), name, err),

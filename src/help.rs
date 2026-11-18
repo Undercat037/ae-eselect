@@ -149,6 +149,40 @@ const MODULES: &[Module] = &[
         ],
     },
     Module {
+        name: "reflector",
+        desc: "Rank repository mirrors and rewrite their mirrorlists",
+        actions: &[
+            Action {
+                name: "rank",
+                args: "[options] <repo>...",
+                desc: "Rank the mirrorlists of the given repositories, fastest first",
+                opts: &[
+                    (
+                        "-n, --number <N>",
+                        "How many of the fastest mirrors stay active (default 10)",
+                    ),
+                    (
+                        "-t, --timeout <S>",
+                        "Total probe time per mirror in seconds (default 5)",
+                    ),
+                    ("-j, --jobs <N>", "Parallel probes (default 8)"),
+                    ("--protocol <P>", "https (default), http or all"),
+                    (
+                        "--active-only",
+                        "Only consider mirrors that are currently active",
+                    ),
+                    ("-p, --pretend", "Show the ranking, write nothing"),
+                ],
+            },
+            Action {
+                name: "list",
+                args: "",
+                desc: "Show the mirrorlist file of every configured repository",
+                opts: &[],
+            },
+        ],
+    },
+    Module {
         name: "repository",
         desc: "Manage repos.conf/eselect.conf and import repository keys",
         actions: &[
@@ -254,7 +288,24 @@ pub fn print_main_help() {
 }
 
 fn print_module_usage(m: &Module) {
-    println!("Usage: eselect {} <action> <options>", m.name);
+    if m.name == "reflector" {
+        println!("Usage: eselect reflector [<options>] <repo>...");
+        println!("       eselect reflector list");
+    } else {
+        println!("Usage: eselect {} <action> <options>", m.name);
+    }
+}
+
+/// `rank` is the implicit action of `reflector`: it is shown without its name.
+fn action_key(m: &Module, a: &Action) -> String {
+    if m.name == "reflector" && a.name == "rank" {
+        return a.args.to_string();
+    }
+    if a.args.is_empty() {
+        a.name.to_string()
+    } else {
+        format!("{} {}", a.name, a.args)
+    }
 }
 
 fn print_module_help(m: &Module) {
@@ -268,11 +319,7 @@ fn print_module_help(m: &Module) {
     println!();
     write_heading("Extra actions:");
     for a in m.actions {
-        let key = if a.args.is_empty() {
-            a.name.to_string()
-        } else {
-            format!("{} {}", a.name, a.args)
-        };
+        let key = action_key(m, a);
         write_kv_list_entry(&key, a.desc);
         for (k, d) in a.opts {
             write_kv_list_entry_at(4, k, d);
@@ -324,6 +371,20 @@ fn skip_globals(args: &[String]) -> (usize, bool) {
 
 /// Handle the Gentoo-style screens. `Some(code)` = done, exit with `code`;
 /// `None` = let clap parse the command line.
+/// `reflector` takes repository names directly: insert the default `rank`
+/// action when the first word after the module is not a known action.
+pub fn default_actions(argv: &mut Vec<String>) {
+    let args: Vec<String> = argv.iter().skip(1).cloned().collect();
+    let (i, _) = skip_globals(&args);
+    if args.get(i).map(String::as_str) != Some("reflector") {
+        return;
+    }
+    match args.get(i + 1).map(String::as_str) {
+        None | Some("rank" | "list" | "help" | "usage" | "version" | "-h" | "--help") => {}
+        Some(_) => argv.insert(i + 2, "rank".to_string()),
+    }
+}
+
 pub fn intercept(args: &[String]) -> Option<i32> {
     // `--colour no` (two words) is handled by clap later; for the help
     // screens only the `=` form and the plain flags matter.

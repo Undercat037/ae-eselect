@@ -1,12 +1,23 @@
 BIN := target/release/eselect
+VERSION := $(shell grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
 
-.PHONY: build install uninstall man completions test clean deltainst
+.PHONY: build install uninstall man completions test git push clean deltainst
 
 build:
 	cargo build --release
 
-test:
+deny:
+	cargo deny check -A parse-error
+
+test: deny
 	cargo test --release
+
+git:
+	git add .
+	git commit -m "v$(VERSION) update"
+
+push: git
+	git push origin main --follow-tags
 
 man:
 	rm -rf man && mkdir -p man

@@ -1,0 +1,65 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install deps
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git rust curl gnupg pacman base-devel
+
+      - uses: actions/checkout@v4
+
+      - name: Test
+        run: cargo test --locked --release
+
+      - name: Build
+        run: cargo build --locked --release
+
+      - name: Man pages and completions are generated
+        run: |
+          bin=./target/release/eselect
+          rm -rf man && mkdir man
+          "$bin" --gen-manpage man
+          [ -s man/eselect.1 ] || { echo "::error::empty man/eselect.1"; exit 1; }
+          for sh in bash zsh fish; do
+            out=$("$bin" --gen-completions "$sh")
+            [ -n "$out" ] || { echo "::error::empty $sh completions"; exit 1; }
+          done
+
+      - name: Help screens and reflector usage
+        env:
+          NO_COLOR: "1"
+        run: |
+          bin=./target/release/eselect
+          "$bin" version
+          "$bin" help | grep -qF "Extra modules:" \
+            || { echo "::error::main help is broken"; exit 1; }
+          out=$("$bin" reflector help)
+          grep -qF "<repo>..." <<<"$out" \
+            || { echo "::error::reflector usage lost the implicit rank form"; exit 1; }
+          if grep -qF -- "--connect-timeout" <<<"$out"; then
+            echo "::error::--connect-timeout must stay removed"; exit 1
+          fi
+          "$bin" reflector rank --help >/dev/null
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check

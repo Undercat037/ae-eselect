@@ -1,5 +1,5 @@
 # Maintainer: Undercat037 <deltacatdeveloper@gmail.com>
-pkgname=aeutils-eselect-git
+pkgname=ae-eselect-git
 pkgver=0.0.0
 pkgrel=1
 pkgdesc="A modular configuration tool in the style of Gentoo eselect for aura-emerge: select profile, repositories and their keys, the world file, caches, the package database lock and Java environments - with Portage-like output."
@@ -8,15 +8,11 @@ url="https://undercat037.github.io/aura-emerge/"
 # Github repo: https://github.com/Undercat037/ae-eselect
 # Gitlab repo: https://gitlab.com/Undercat037/ae-eselect
 license=('GPL-3.0-only')
-depends=('gnupg')
-optdepends=(
-  'aura-emerge: eselect core'
-  'pacman: libalpm - package, cache, path and keyring layout'
-)
+depends=('gnupg' 'curl' 'pacman' 'aura-emerge')
 makedepends=('rust' 'cargo')
-conflicts=('portage' 'portage-git' 'eselect-git' 'aeutils-eselect')
-provides=('eselect' 'aeutils-eselect')
-install=aeutils-eselect.install
+conflicts=('portage' 'portage-git' 'eselect-git' 'ae-eselect')
+provides=('eselect' 'ae-eselect')
+install=ae-eselect.install
 source=()
 sha256sums=()
 

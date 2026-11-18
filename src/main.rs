@@ -33,7 +33,7 @@ mod out;
 mod paths;
 mod util;
 
-use modules::{cache, db, java, news, profile, repository, world};
+use modules::{cache, db, java, news, profile, reflector, repository, world};
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ColourMode {
@@ -123,6 +123,11 @@ enum Module {
         #[command(subcommand)]
         action: DbAction,
     },
+    /// Rank repository mirrors and rewrite their mirrorlists
+    Reflector {
+        #[command(subcommand)]
+        action: Option<ReflectorAction>,
+    },
     /// Manage installed Java environments (built-in archlinux-java)
     Java {
         #[command(subcommand)]
@@ -134,6 +139,37 @@ enum Module {
     Usage,
     /// Display version information
     Version,
+}
+
+#[derive(Subcommand)]
+enum ReflectorAction {
+    /// Rank the mirrorlists of the given repositories (implicit: `eselect reflector core world`)
+    #[command(hide = true)]
+    Rank {
+        /// Repositories, e.g. `core blackarch world system`
+        #[arg(required = true)]
+        repos: Vec<String>,
+        /// How many of the fastest mirrors stay active
+        #[arg(short = 'n', long = "number", default_value_t = 10)]
+        number: usize,
+        /// Per-mirror probe timeout in seconds
+        #[arg(short = 't', long = "timeout", default_value_t = 5)]
+        timeout: u64,
+        /// Parallel probes
+        #[arg(short = 'j', long = "jobs", default_value_t = 8)]
+        jobs: usize,
+        /// Probe https, http or all (http+https)
+        #[arg(long = "protocol", default_value = "https")]
+        protocol: String,
+        /// Only consider mirrors that are currently active
+        #[arg(long = "active-only")]
+        active_only: bool,
+        /// Show the ranking, write nothing (no root needed)
+        #[arg(short = 'p', long = "pretend")]
+        pretend: bool,
+    },
+    /// Show the mirrorlist file of every configured repository
+    List,
 }
 
 #[derive(Subcommand)]
@@ -298,6 +334,8 @@ fn main() {
     if invoked == "archlinux-java" {
         argv.insert(1, "java".to_string());
     }
+    // `eselect reflector core blackarch` == `eselect reflector rank core blackarch`
+    help::default_actions(&mut argv);
     let args: Vec<String> = argv.iter().skip(1).cloned().collect();
     if let Some(code) = help::intercept(&args) {
         std::process::exit(code);
@@ -356,6 +394,26 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             println!("eselect {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
+        Module::Reflector { action } => match action {
+            Some(ReflectorAction::Rank {
+                repos,
+                number,
+                timeout,
+                jobs,
+                protocol,
+                active_only,
+                pretend,
+            }) => reflector::cmd_rank(reflector::RankOpts {
+                repos,
+                number,
+                timeout,
+                jobs,
+                protocol,
+                active_only,
+                pretend,
+            }),
+            Some(ReflectorAction::List) | None => reflector::cmd_list(),
+        },
         Module::Java { action } => match action.unwrap_or(JavaAction::Status) {
             JavaAction::Status => java::cmd_status(),
             JavaAction::Get => java::cmd_get(),

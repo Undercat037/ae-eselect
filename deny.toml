@@ -1,0 +1,50 @@
+# cargo-deny config for ae-eselect
+# Run: cargo deny check
+
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-unknown-linux-gnu" },
+]
+all-features = false
+no-default-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+unmaintained = "all"
+ignore = []
+
+[licenses]
+version = 2
+# Only licenses that ae-eselect's dependency tree actually uses:
+# an entry that matches nothing makes cargo-deny warn.
+allow = [
+    "GPL-3.0-only",
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause", # zstd-sys: "BSD-3-Clause AND BSD-2-Clause"
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+]
+confidence-threshold = 0.8
+exceptions = []
+
+[licenses.private]
+ignore = false
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+deny = []
+allow = []
+skip = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
